@@ -49,7 +49,7 @@ export async function runAgentCycle(
   console.log(`${tag} Step 2: indicators ready (${candles.length} candles)`)
 
   // ── Step 3: Gemini decision ──────────────────────────────────────────────
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-pro'
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite'
   console.log(`${tag} Step 3: calling Gemini (${model})…`)
   const decisionPrompt = buildDecisionPrompt(config, price, indicators)
 
