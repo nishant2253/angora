@@ -97,7 +97,7 @@ export default function DashboardPage({
     queryKey: ['executions', agentId],
     queryFn: () =>
       fetch(`${API_URL}/api/agents/${agentId}/executions`).then((r) => r.json()),
-    refetchInterval: 30000,
+    refetchInterval: 10000,
   })
   // Guard: API may return an error object if DB is unavailable — fall back to []
   const executions: Execution[] = Array.isArray(rawData) ? rawData : []

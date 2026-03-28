@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { useAccount, useWriteContract } from 'wagmi'
+import { useAccount, useWriteContract, useDisconnect, useSwitchChain } from 'wagmi'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
@@ -10,6 +10,7 @@ import { StatCard } from '@/components/ui/StatCard'
 import { MOCK_USDT_ABI } from '@/lib/abis'
 import { PhantomConnectButton } from '@/components/wallet/PhantomButton'
 import { toast } from 'sonner'
+import { monadTestnet } from '@/lib/wagmi'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
 
@@ -91,10 +92,26 @@ function TxHistoryTable({ txs }: { txs: TxRecord[] }) {
 }
 
 export default function WalletPage() {
-  const { address, isConnected } = useAccount()
+  const { address, isConnected, chainId } = useAccount()
   const { monBalance, usdtBalance, isOnMonad } = useWallet()
   const { writeContractAsync } = useWriteContract()
+  const { disconnect } = useDisconnect()
+  const { switchChain } = useSwitchChain()
   const [isClaiming, setIsClaiming] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = () => {
+    if (!address) return
+    navigator.clipboard.writeText(address)
+    setCopied(true)
+    toast.success('Address copied to clipboard')
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleDisconnect = () => {
+    disconnect()
+    toast.success('Wallet disconnected')
+  }
 
   const { data: txHistory = [], isLoading: txLoading } = useQuery<TxRecord[]>({
     queryKey: ['txHistory', address],
@@ -141,19 +158,101 @@ export default function WalletPage() {
 
   return (
     <main className="min-h-screen pt-24 pb-16 px-4 max-w-4xl mx-auto">
-      {/* Header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-2 mb-1">
+      {/* Wallet Connection Card */}
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="mb-8"
+      >
+        <div className="flex items-center gap-2 mb-3">
           <span className="text-xs font-mono text-[#836EF9] uppercase tracking-widest">Wallet</span>
         </div>
-        <h1 className="text-3xl font-bold text-white">Wallet Dashboard</h1>
-        <p className="text-angora-muted text-sm font-mono mt-1 break-all">{address}</p>
-        {!isOnMonad && (
-          <p className="text-yellow-400 text-xs mt-2">
-            Switch to Monad Testnet (chain ID 10143) to see correct balances.
-          </p>
-        )}
-      </div>
+        <h1 className="text-3xl font-bold text-white mb-4">Wallet Dashboard</h1>
+
+        <GlassCard className="p-5">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            {/* Left: status + address */}
+            <div className="flex items-start gap-3">
+              <div className="mt-1 w-3 h-3 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)] animate-pulse flex-shrink-0" />
+              <div>
+                <p className="text-xs text-angora-muted uppercase tracking-wider mb-1">
+                  Connected · Monad Testnet
+                  {!isOnMonad && (
+                    <span className="ml-2 text-yellow-400">
+                      (wrong network — chain {chainId})
+                    </span>
+                  )}
+                </p>
+                <p className="font-mono text-white text-sm break-all">{address}</p>
+              </div>
+            </div>
+
+            {/* Right: action buttons */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {/* Copy address */}
+              <button
+                onClick={handleCopy}
+                title="Copy address"
+                className="px-3 py-1.5 rounded-lg border border-angora-border text-angora-muted text-xs hover:border-[#836EF9]/50 hover:text-white transition-all flex items-center gap-1.5"
+              >
+                {copied ? (
+                  <>
+                    <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                    Copied!
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                    Copy
+                  </>
+                )}
+              </button>
+
+              {/* Switch network — only when on wrong chain */}
+              {!isOnMonad && (
+                <button
+                  onClick={() => switchChain({ chainId: monadTestnet.id })}
+                  className="px-3 py-1.5 rounded-lg border border-yellow-500/40 bg-yellow-500/10 text-yellow-400 text-xs hover:bg-yellow-500/20 transition-all flex items-center gap-1.5"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                  </svg>
+                  Switch to Monad
+                </button>
+              )}
+
+              {/* Explorer link */}
+              <a
+                href={`https://testnet.monadexplorer.com/address/${address}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="View on explorer"
+                className="px-3 py-1.5 rounded-lg border border-angora-border text-angora-muted text-xs hover:border-[#836EF9]/50 hover:text-white transition-all flex items-center gap-1.5"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+                Explorer
+              </a>
+
+              {/* Disconnect */}
+              <button
+                onClick={handleDisconnect}
+                className="px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs hover:bg-red-500/20 hover:border-red-500/60 transition-all flex items-center gap-1.5"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+                Disconnect
+              </button>
+            </div>
+          </div>
+        </GlassCard>
+      </motion.div>
 
       {/* Balance Cards — StatCard with animated count-up + color glow (Section 5 spec) */}
       <motion.div

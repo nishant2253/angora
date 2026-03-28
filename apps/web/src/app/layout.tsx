@@ -18,7 +18,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`}>
-      <body className="bg-angora-bg text-white antialiased">
+      <body className="bg-angora-bg text-white antialiased" suppressHydrationWarning>
         <Providers>
           <Navbar />
           <main className="pt-16">{children}</main>

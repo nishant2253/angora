@@ -54,7 +54,7 @@ export async function buildFromPrompt(
   prompt: string
 ): Promise<{ config: AgentConfig; configHash: string }> {
   const model = genAI.getGenerativeModel({
-    model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+    model: process.env.GEMINI_MODEL || 'gemini-2.5-pro',
     // thinkingConfig is supported by the API but not yet typed in SDK v0.24.1
     generationConfig: {
       responseMimeType: 'application/json',

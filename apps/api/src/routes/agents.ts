@@ -37,10 +37,10 @@ agentsRouter.post(
 )
 
 // ── POST /api/agents/deploy ───────────────────────────────────────────────
-// Body: { prompt: string, ownerAddress: string }
+// Body: { agentId: string (from frontend), prompt: string, ownerAddress: string, txHash?: string }
 // Returns: { agentId, configHash, txHash, explorerUrl }
 agentsRouter.post('/deploy', async (req: Request, res: Response) => {
-  const { prompt, ownerAddress } = req.body
+  const { agentId: clientAgentId, prompt, ownerAddress, txHash: clientTxHash } = req.body
 
   if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
     res.status(400).json({ error: 'prompt is required' })
@@ -50,51 +50,52 @@ agentsRouter.post('/deploy', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'ownerAddress is required' })
     return
   }
+  if (!clientAgentId || typeof clientAgentId !== 'string') {
+    res.status(400).json({ error: 'agentId is required' })
+    return
+  }
+
+  console.log(`[deploy] saving agent ${clientAgentId} for owner ${ownerAddress.slice(0, 10)}…`)
 
   try {
     // 1. Build config from natural language prompt
     const { config, configHash } = await buildFromPrompt(prompt.trim())
+    console.log(`[deploy] config built: strategy=${config.strategyType} asset=${config.asset}`)
 
-    // 2. Generate deterministic agent ID
-    const agentId = crypto.randomUUID()
+    // 2. Use the client-supplied agentId (same one used in Phantom registerAgent call)
+    const agentId = clientAgentId
 
-    // 3. Persist to DB (non-fatal if DB unavailable)
-    try {
-      await prisma.agent.create({
-        data: {
-          id: agentId,
-          ownerAddress,
-          config: config as any,
-          configHash,
-          strategyType: config.strategyType,
-        },
-      })
-    } catch (dbErr) {
-      console.warn('[agents] prisma.agent.create failed (non-fatal):', (dbErr as Error).message)
-    }
+    // 3. Persist to DB — FATAL: if this fails, we return an error so the
+    //    frontend knows the agent was not saved and won't redirect to a broken dashboard.
+    await prisma.agent.create({
+      data: {
+        id: agentId,
+        ownerAddress,
+        config: config as any,
+        configHash,
+        strategyType: config.strategyType,
+        txHash: clientTxHash ?? null,
+      },
+    })
+    console.log(`[deploy] agent ${agentId} saved to DB ✓`)
 
-    // 4. Register on-chain
-    let txHash: string | null = null
-    let explorerUrl: string | null = null
+    // 4. Register on-chain via backend signer (best-effort, Phantom already did it)
+    let txHash: string | null = clientTxHash ?? null
+    let explorerUrl: string | null = txHash ? `https://testnet.monadexplorer.com/tx/${txHash}` : null
 
     try {
       const signer = getSigner()
       const registry = getRegistryContract(signer)
-      const tx = await registry.registerAgent(
-        agentId,
-        configHash,
-        config.strategyType
-      )
+      const tx = await registry.registerAgent(agentId, configHash, config.strategyType)
       const receipt = await tx.wait()
       txHash = receipt?.hash ?? tx.hash
       explorerUrl = `https://testnet.monadexplorer.com/tx/${txHash}`
 
-      // Update DB with txHash (non-fatal)
-      try {
-        await prisma.agent.update({ where: { id: agentId }, data: { txHash } })
-      } catch { /* db unavailable */ }
+      // Update DB with backend txHash
+      await prisma.agent.update({ where: { id: agentId }, data: { txHash } }).catch(() => {})
+      console.log(`[deploy] on-chain registration confirmed txHash=${txHash}`)
     } catch (chainErr) {
-      console.warn('[agents] on-chain registerAgent failed (non-fatal):', chainErr)
+      console.warn('[deploy] on-chain registerAgent skipped (non-fatal):', (chainErr as Error).message)
     }
 
     res.json({ agentId, configHash, config, txHash, explorerUrl })
@@ -109,7 +110,7 @@ agentsRouter.post('/deploy', async (req: Request, res: Response) => {
 })
 
 // ── POST /api/agents/:id/trigger ──────────────────────────────────────────
-// Immediately runs one agent cycle.
+// Immediately runs one agent cycle (called by "Run Now" button).
 // Body (optional):
 //   txHash  — hex string from Phantom's logExecution() approval.
 //             When STRICT_TX_VERIFY=true, verifies the tx was confirmed on Monad.
@@ -118,59 +119,74 @@ agentsRouter.post('/deploy', async (req: Request, res: Response) => {
 agentsRouter.post('/:id/trigger', async (req: Request, res: Response) => {
   const id = req.params['id'] as string
   const { txHash, config: bodyConfig } = req.body ?? {}
+  const startMs = Date.now()
+
+  console.log(`\n[trigger] ════ RUN NOW received ════════════════════════════`)
+  console.log(`[trigger] agentId : ${id}`)
+  console.log(`[trigger] phantomTx: ${txHash ? (txHash as string).slice(0, 20) + '…' : 'none'}`)
+  console.log(`[trigger] time    : ${new Date().toISOString()}`)
 
   try {
     // ── Step 1: Load agent from DB ───────────────────────────────────────
     let config: AgentConfig | undefined = bodyConfig
 
     if (!config) {
+      console.log(`[trigger] loading agent from DB…`)
       const agent = await prisma.agent.findUnique({ where: { id } })
       if (!agent) {
+        console.warn(`[trigger] agent ${id} NOT FOUND in DB`)
         res.status(404).json({ error: `Agent ${id} not found` })
         return
       }
       if (!agent.active) {
+        console.warn(`[trigger] agent ${id} is INACTIVE`)
         res.status(400).json({ error: `Agent ${id} is inactive` })
         return
       }
       config = agent.config as AgentConfig
+      console.log(`[trigger] agent loaded: name="${(config as any).name}" asset=${(config as any).asset} active=true`)
     }
 
     // ── Step 2: Optional on-chain tx verification (Section 4.2) ─────────
-    // When STRICT_TX_VERIFY=true, confirm the Phantom logExecution tx landed.
     if (txHash && process.env.STRICT_TX_VERIFY === 'true') {
+      console.log(`[trigger] verifying Phantom tx on-chain…`)
       try {
         const provider = new ethers.JsonRpcProvider(process.env.MONAD_RPC_URL)
         const receipt = await provider.getTransactionReceipt(txHash as string)
         if (!receipt || receipt.status !== 1) {
+          console.warn(`[trigger] tx verification FAILED — receipt:`, receipt)
           res.status(400).json({ error: 'Invalid or failed transaction — tx not confirmed on Monad' })
           return
         }
+        console.log(`[trigger] tx verified ✓ block=${receipt.blockNumber}`)
       } catch (verifyErr) {
-        console.warn('[agents] tx verification failed (non-fatal):', (verifyErr as Error).message)
-        // In non-strict mode we let it through; strict mode already handled above.
+        console.warn('[trigger] tx verification error (non-fatal):', (verifyErr as Error).message)
       }
     }
 
-    // Log the txHash for audit trail
-    if (txHash) {
-      console.log(`[agents] trigger ${id.slice(0, 8)} — phantom tx: ${(txHash as string).slice(0, 18)}…`)
-    }
-
     // ── Step 3: Run the AI cycle ─────────────────────────────────────────
+    console.log(`[trigger] starting AI cycle…`)
     const result = await runAgentCycle(id, config)
+    const elapsed = Date.now() - startMs
+
+    console.log(`[trigger] ════ RUN NOW complete ═══════════════════════════`)
+    console.log(`[trigger] signal    : ${result.signal}`)
+    console.log(`[trigger] confidence: ${result.confidence}%`)
+    console.log(`[trigger] price     : $${result.price.toFixed(4)}`)
+    console.log(`[trigger] txHash    : ${result.txHash ?? 'none (HOLD)'}`)
+    console.log(`[trigger] elapsed   : ${elapsed} ms`)
+    console.log(`[trigger] ═══════════════════════════════════════════════════\n`)
 
     res.json({
       signal: result.signal,
       confidence: result.confidence,
       reasoning: result.reasoning,
       price: result.price,
-      // Echo back the Phantom-signed txHash from the request body when the AI
-      // cycle doesn't produce its own on-chain hash (Section 4.2 spec)
       txHash: result.txHash ?? (txHash as string | undefined) ?? null,
     })
   } catch (err) {
-    console.error(`[agents] trigger error for ${id}:`, err)
+    const elapsed = Date.now() - startMs
+    console.error(`[trigger] ERROR after ${elapsed} ms for agent ${id}:`, err)
     res.status(500).json({ error: String(err) })
   }
 })

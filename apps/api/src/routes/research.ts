@@ -73,30 +73,40 @@ function classifyRegime(prices: AssetPrice[]): { regime: string; color: string }
 }
 
 // ── GET /api/research/commentary ────────────────────────────────────────────
-researchRouter.get('/commentary', async (_req: Request, res: Response) => {
+// Query params:
+//   ?fresh=true  — bypass Redis cache and generate a new analysis
+researchRouter.get('/commentary', async (req: Request, res: Response) => {
   const client = getRedis()
+  const fresh = req.query['fresh'] === 'true'
 
-  // Try cache first
-  try {
-    await client.connect().catch(() => {}) // connect if not already
-    const cached = await client.get(CACHE_KEY)
-    if (cached) {
-      res.json(JSON.parse(cached))
-      return
+  // Try cache first (skip when ?fresh=true)
+  if (!fresh) {
+    try {
+      await client.connect().catch(() => {})
+      const cached = await client.get(CACHE_KEY)
+      if (cached) {
+        console.log('[research] serving commentary from cache')
+        res.json({ ...JSON.parse(cached), fromCache: true })
+        return
+      }
+    } catch {
+      // Redis unavailable — proceed to generate live
     }
-  } catch {
-    // Redis unavailable — proceed to generate live
+  } else {
+    console.log('[research] ?fresh=true — bypassing cache, generating new analysis')
   }
 
   try {
     const prices = await fetchAllCurrentPrices()
     const regime = classifyRegime(prices)
 
+    const researchModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite'
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
     const model = genAI.getGenerativeModel({
-      model: process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-05-20',
+      model: researchModel,
       generationConfig: { temperature: 0.3 },
     })
+    console.log(`[research] generating commentary with ${researchModel}…`)
 
     const prompt = `You are a professional crypto market analyst. Analyze these live market conditions from Pyth Network:
 

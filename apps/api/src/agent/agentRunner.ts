@@ -26,7 +26,11 @@ export async function runAgentCycle(
   agentId: string,
   config: AgentConfig
 ): Promise<CycleResult> {
+  const tag = `[agentRunner:${agentId.slice(0, 8)}]`
+  console.log(`${tag} ── cycle start ──────────────────────────────────────`)
+
   // ── Step 1: Fetch live Pyth price ────────────────────────────────────────
+  console.log(`${tag} Step 1: fetching Pyth price for ${config.asset}…`)
   const feedId = getFeedId(config.asset)
   const prices = await fetchPrices([feedId])
   const priceData = prices[0]
@@ -36,23 +40,28 @@ export async function runAgentCycle(
   }
 
   const price = priceData.price
+  console.log(`${tag} Step 1: price = $${price.toFixed(4)}`)
 
   // ── Step 2: Fetch OHLCV + calculate indicators ───────────────────────────
+  console.log(`${tag} Step 2: building OHLCV + indicators…`)
   const candles = fetchOHLCV(config.asset, config.timeframe, 60, price)
   const indicators = calculateIndicators(candles, config)
+  console.log(`${tag} Step 2: indicators ready (${candles.length} candles)`)
 
   // ── Step 3: Gemini decision ──────────────────────────────────────────────
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-pro'
+  console.log(`${tag} Step 3: calling Gemini (${model})…`)
   const decisionPrompt = buildDecisionPrompt(config, price, indicators)
 
-  const model = genAI.getGenerativeModel({
-    model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+  const geminiModel = genAI.getGenerativeModel({
+    model,
     generationConfig: {
       responseMimeType: 'application/json',
       temperature: 0.1,
     } as any,
   })
 
-  const geminiResult = await model.generateContent(decisionPrompt)
+  const geminiResult = await geminiModel.generateContent(decisionPrompt)
   const rawText = geminiResult.response.text().replace(/```json|```/g, '').trim()
   const decision = JSON.parse(rawText) as {
     signal: 'BUY' | 'SELL' | 'HOLD'
@@ -61,22 +70,21 @@ export async function runAgentCycle(
   }
 
   const { signal, confidence, reasoning } = decision
+  console.log(`${tag} Step 3: Gemini → signal=${signal} confidence=${confidence}% reasoning="${reasoning.slice(0, 80)}…"`)
 
   // ── Step 4: Execute trade if confident enough ────────────────────────────
   let txHash: string | null = null
 
   if (signal !== 'HOLD' && confidence > 55) {
+    console.log(`${tag} Step 4: executing ${signal} trade on MockDEX…`)
     try {
       const signer = getSigner()
       const dex = getDexContract(signer)
 
       let tx: ethers.TransactionResponse
       if (signal === 'SELL') {
-        // Send MON, receive mUSDT
         tx = await dex.sellMON(agentId, 0n, { value: TRADE_MON })
       } else {
-        // BUY: send mUSDT, receive MON
-        // First approve mUSDT spend (MockUSDT.approve)
         const usdtAbi = [
           'function approve(address spender, uint256 amount) returns (bool)',
         ]
@@ -94,29 +102,40 @@ export async function runAgentCycle(
       }
       const receipt = await tx.wait()
       txHash = receipt?.hash ?? tx.hash
+      console.log(`${tag} Step 4: trade confirmed — txHash=${txHash}`)
     } catch (err) {
-      console.warn(`[agentRunner] trade failed (non-fatal):`, err)
+      console.warn(`${tag} Step 4: trade failed (non-fatal):`, (err as Error).message)
     }
+  } else {
+    console.log(`${tag} Step 4: no trade — signal=${signal}, confidence=${confidence}% (threshold: >55% and not HOLD)`)
   }
 
-  // ── Step 5: Log execution on-chain ───────────────────────────────────────
+  // ── Step 5: Log execution on-chain (5 s timeout so we never block) ───────
+  // The Monad testnet RPC can be slow; cap at 5 s so Run Now responds fast.
   let logTxHash = txHash
+  console.log(`${tag} Step 5: logging on-chain (5 s timeout)…`)
   try {
     const signer = getSigner()
     const registry = getRegistryContract(signer)
-    // price * 1e8 to match Pyth's 8-decimal integer representation
     const priceInt = BigInt(Math.round(price * 1e8))
-    const logTx = await registry.logExecution(agentId, signal, priceInt)
+    const logTx = await Promise.race([
+      registry.logExecution(agentId, signal, priceInt),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('logExecution RPC timeout (5 s)')), 5_000)
+      ),
+    ])
     const logReceipt = await logTx.wait()
     logTxHash = logReceipt?.hash ?? logTx.hash
     if (!txHash) txHash = logTxHash
+    console.log(`${tag} Step 5: on-chain log confirmed — txHash=${logTxHash}`)
   } catch (err) {
-    console.warn(`[agentRunner] logExecution failed (non-fatal):`, err)
+    console.warn(`${tag} Step 5: on-chain log skipped (non-fatal): ${(err as Error).message}`)
   }
 
   // ── Step 6: Persist to Prisma DB ─────────────────────────────────────────
+  console.log(`${tag} Step 6: persisting execution to DB…`)
   try {
-    await prisma.execution.create({
+    const saved = await prisma.execution.create({
       data: {
         agentId,
         signal,
@@ -126,9 +145,11 @@ export async function runAgentCycle(
         txHash: logTxHash,
       },
     })
+    console.log(`${tag} Step 6: saved execution id=${saved.id} signal=${signal} price=$${price.toFixed(4)}`)
   } catch (err) {
-    console.warn(`[agentRunner] prisma.execution.create failed (non-fatal):`, err)
+    console.warn(`${tag} Step 6: prisma.execution.create failed (non-fatal):`, (err as Error).message)
   }
 
+  console.log(`${tag} ── cycle done: ${signal} ${confidence}% ───────────────`)
   return { agentId, signal, confidence, reasoning, price, txHash }
 }

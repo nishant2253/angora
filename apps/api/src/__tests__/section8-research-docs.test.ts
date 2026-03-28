@@ -225,9 +225,9 @@ describe('Section 8.1 — GET /api/research/commentary', () => {
     expect(14400).toBe(4 * 60 * 60)
   })
 
-  it('default model name is gemini-2.5-flash-preview-05-20 per spec (env var may override)', () => {
+  it('default model name is gemini-2.5-flash-pro per spec (env var may override)', () => {
     // The spec mandates this default. Env var GEMINI_MODEL can override it in production.
-    const specDefault = 'gemini-2.5-flash-preview-05-20'
+    const specDefault = 'gemini-2.5-pro'
     const effectiveModel = process.env.GEMINI_MODEL || specDefault
     // The effective model must be a Gemini model
     expect(effectiveModel).toMatch(/gemini/)

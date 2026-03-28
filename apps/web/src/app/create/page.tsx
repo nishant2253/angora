@@ -119,6 +119,8 @@ export default function CreatePage() {
     setDeploying(true)
     setError('')
 
+    // Generate the agent ID here so the same ID is used both on-chain
+    // (Phantom registerAgent call) and in the DB (backend /deploy call).
     const newAgentId = crypto.randomUUID()
 
     try {
@@ -134,15 +136,26 @@ export default function CreatePage() {
         ],
       })
 
-      // 2. Persist to DB via backend (non-blocking, best-effort)
-      fetch(`${API_URL}/api/agents/deploy`, {
+      // 2. Persist to DB — AWAITED so we catch failures, and we send the
+      //    same newAgentId so the DB record matches the on-chain ID.
+      const deployRes = await fetch(`${API_URL}/api/agents/deploy`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          agentId: newAgentId,
           prompt,
           ownerAddress: address,
+          txHash: hash,
         }),
-      }).catch(() => {/* non-fatal */})
+      })
+
+      if (!deployRes.ok) {
+        const err = await deployRes.json().catch(() => ({}))
+        throw new Error(err.error ?? `Backend deploy failed (${deployRes.status})`)
+      }
+
+      const deployData = await deployRes.json()
+      console.log('[Create] agent saved to DB:', deployData.agentId, '— txHash:', hash)
 
       setAgentId(newAgentId)
       setTxHash(hash)

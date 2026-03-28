@@ -288,24 +288,28 @@ function VolatilityIndex({ pricesData }: { pricesData: PricesResponse | undefine
 
 export default function ResearchPage() {
   const [refreshKey, setRefreshKey] = useState(0)
+  // Controls whether the AI commentary has ever been requested this session
+  const [aiRequested, setAiRequested] = useState(false)
 
-  // Fetch live regime data (fast, no AI)
+  // Fetch live regime data (fast, no AI — always auto-fetches)
   const { data: regimeData } = useQuery<RegimePriceResponse>({
     queryKey: ['research-prices', refreshKey],
     queryFn: () => fetch(`${API_URL}/api/research/prices`).then((r) => r.json()),
     refetchInterval: 30_000,
   })
 
-  // Fetch AI commentary (slower, cached 4h on server)
+  // AI commentary — only fetches when the user clicks the button (enabled: aiRequested)
   const {
     data: commentary,
     isLoading: commentaryLoading,
-    refetch: refetchCommentary,
+    isFetching: commentaryFetching,
   } = useQuery<CommentaryResponse>({
     queryKey: ['research-commentary', refreshKey],
     queryFn: () =>
-      fetch(`${API_URL}/api/research/commentary`).then((r) => r.json()),
-    staleTime: 1000 * 60 * 60,
+      fetch(`${API_URL}/api/research/commentary?fresh=true`).then((r) => r.json()),
+    enabled: aiRequested,
+    staleTime: Infinity, // don't re-fetch in background; only on user action
+    retry: false,
   })
 
   // Fetch live prices (includes history[] for correlation + volatility)
@@ -314,6 +318,18 @@ export default function ResearchPage() {
     queryFn: () => fetch(`${API_URL}/api/prices`).then((r) => r.json()),
     refetchInterval: 30_000,
   })
+
+  const handleGenerateAI = () => {
+    if (!aiRequested) {
+      // First time: enable the query (it will auto-fire)
+      setAiRequested(true)
+    } else {
+      // Subsequent clicks: bump key to force a fresh fetch
+      setRefreshKey((k) => k + 1)
+    }
+  }
+
+  const isAIRunning = commentaryLoading || commentaryFetching
 
   const regime = commentary?.regime ?? regimeData?.regime ?? 'RANGING'
   const regimeStyle = REGIME_STYLES[regime] ?? REGIME_STYLES.RANGING
@@ -332,17 +348,15 @@ export default function ResearchPage() {
             <div>
               <h1 className="text-4xl font-bold text-white mb-2">Research.</h1>
               <p className="text-angora-muted">
-                AI-powered market analysis. Powered by Gemini 2.5 Flash + Pyth live data.
+                AI-powered market analysis. Powered by Gemini 2.5 Pro + Pyth live data.
               </p>
             </div>
+            {/* Refresh live prices (non-AI) */}
             <button
-              onClick={() => {
-                setRefreshKey((k) => k + 1)
-                refetchCommentary()
-              }}
+              onClick={() => setRefreshKey((k) => k + 1)}
               className="px-4 py-2 text-sm border border-angora-border text-angora-muted rounded-lg hover:border-angora-primary/50 hover:text-white transition-all"
             >
-              Refresh Analysis
+              Refresh Prices
             </button>
           </div>
         </div>
@@ -397,13 +411,6 @@ export default function ResearchPage() {
               </GlassCard>
             </motion.div>
 
-            {commentary?.generatedAt && (
-              <p className="text-angora-muted text-xs text-center">
-                Analysis generated at{' '}
-                {new Date(commentary.generatedAt).toLocaleTimeString()}
-                {' '}· cached 4h
-              </p>
-            )}
           </div>
 
           {/* ── Right column ─────────────────────────────────────────────── */}
@@ -421,39 +428,98 @@ export default function ResearchPage() {
                     <p className="text-angora-muted text-xs uppercase tracking-wider">
                       AI Market Commentary
                     </p>
-                    <p className="text-white font-bold mt-0.5">Gemini 2.5 Flash Analysis</p>
+                    <p className="text-white font-bold mt-0.5">Gemini 2.5 Pro Analysis</p>
                   </div>
                   <span className="text-xs px-2 py-1 rounded-full bg-angora-primary/10 text-angora-primary border border-angora-primary/20 font-mono">
-                    AI
+                    AI · Pro
                   </span>
                 </div>
 
-                {commentaryLoading ? (
+                {/* Idle state — not yet requested */}
+                {!aiRequested && !commentary && (
+                  <div className="flex flex-col items-center gap-4 py-8 text-center">
+                    <div className="w-12 h-12 rounded-full bg-angora-primary/10 border border-angora-primary/20 flex items-center justify-center">
+                      <svg className="w-6 h-6 text-angora-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-white font-semibold text-sm">Ready to analyse</p>
+                      <p className="text-angora-muted text-xs mt-1 max-w-xs">
+                        Click below to fetch live Pyth prices and generate a full Gemini 2.5 Pro market commentary.
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleGenerateAI}
+                      className="px-5 py-2.5 bg-angora-primary text-white rounded-lg text-sm font-semibold hover:bg-angora-primary/80 transition-all flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l14 9-14 9V3z" />
+                      </svg>
+                      Generate AI Analysis
+                    </button>
+                  </div>
+                )}
+
+                {/* Loading state */}
+                {isAIRunning && (
                   <div className="space-y-3">
                     <div className="h-4 bg-angora-surface/40 rounded animate-pulse w-full" />
                     <div className="h-4 bg-angora-surface/40 rounded animate-pulse w-5/6" />
                     <div className="h-4 bg-angora-surface/40 rounded animate-pulse w-4/5" />
                     <div className="h-4 bg-angora-surface/40 rounded animate-pulse w-full mt-2" />
                     <div className="h-4 bg-angora-surface/40 rounded animate-pulse w-3/4" />
-                    <p className="text-angora-muted text-xs text-center mt-2">
-                      Generating AI analysis (may take 5–10s on first load)…
+                    <p className="text-angora-muted text-xs text-center mt-3 flex items-center justify-center gap-2">
+                      <span className="w-3 h-3 border border-angora-primary/30 border-t-angora-primary rounded-full animate-spin inline-block" />
+                      Gemini 2.5 Pro is analysing live market data… (10–20s)
                     </p>
                   </div>
-                ) : commentary?.commentary ? (
-                  <div className="space-y-3">
-                    {commentary.commentary
-                      .split('\n\n')
-                      .filter(Boolean)
-                      .map((para, i) => (
-                        <p key={i} className="text-angora-muted text-sm leading-relaxed">
-                          {para.replace(/\*\*/g, '')}
-                        </p>
-                      ))}
+                )}
+
+                {/* Result */}
+                {!isAIRunning && commentary?.commentary && (
+                  <div>
+                    <div className="space-y-3 mb-5">
+                      {commentary.commentary
+                        .split('\n\n')
+                        .filter(Boolean)
+                        .map((para, i) => (
+                          <p key={i} className="text-angora-muted text-sm leading-relaxed">
+                            {para.replace(/\*\*/g, '')}
+                          </p>
+                        ))}
+                    </div>
+                    <div className="flex items-center justify-between pt-4 border-t border-angora-border">
+                      <p className="text-angora-muted text-xs">
+                        Generated {new Date(commentary.generatedAt).toLocaleTimeString()}
+                      </p>
+                      <button
+                        onClick={handleGenerateAI}
+                        disabled={isAIRunning}
+                        className="px-3 py-1.5 text-xs border border-angora-border text-angora-muted rounded-lg hover:border-angora-primary/50 hover:text-white transition-all flex items-center gap-1.5 disabled:opacity-50"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        Regenerate
+                      </button>
+                    </div>
                   </div>
-                ) : (
-                  <p className="text-angora-muted text-sm">
-                    AI commentary unavailable. Check that GEMINI_API_KEY is set in the API.
-                  </p>
+                )}
+
+                {/* Error state */}
+                {!isAIRunning && aiRequested && !commentary?.commentary && (
+                  <div className="text-center py-6">
+                    <p className="text-red-400 text-sm mb-3">
+                      Failed to generate commentary — check that GEMINI_API_KEY is set.
+                    </p>
+                    <button
+                      onClick={handleGenerateAI}
+                      className="px-4 py-2 text-xs border border-red-500/30 text-red-400 rounded-lg hover:bg-red-500/10 transition-all"
+                    >
+                      Retry
+                    </button>
+                  </div>
                 )}
               </GlassCard>
             </motion.div>

@@ -337,7 +337,7 @@ Navigate to [http://localhost:3000/research](http://localhost:3000/research).
 **What you should see:**
 
 **AI Commentary section:**
-- Powered by Gemini 2.5 Flash (`gemini-2.5-flash-preview-05-20`)
+- Powered by Gemini 2.5 Flash (`gemini-2.5-flash`)
 - Market regime badge: `BULL`, `BEAR`, or `SIDEWAYS`
 - Detailed AI analysis of current market conditions (cached 4 hours in Redis — first load may take 2–3s)
 
