@@ -1,0 +1,35 @@
+{
+  "name": "angora",
+  "version": "1.0.0",
+  "description": "AI Trading Agents on Monad Blockchain",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace=apps/api",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "redis:start": "brew services start redis",
+    "redis:stop": "brew services stop redis",
+    "redis:ping": "redis-cli ping",
+    "clean:web": "rm -rf apps/web/.next",
+    "clean:api": "rm -rf apps/api/dist",
+    "clean": "npm run clean:web && npm run clean:api",
+    "test": "npm run test --workspaces --if-present",
+    "test:api": "npm run test --workspace=apps/api",
+    "build": "npm run build --workspaces --if-present",
+    "build:web": "npm run build --workspace=apps/web",
+    "prisma:migrate": "npm run --workspace=apps/api prisma migrate dev --name init",
+    "prisma:generate": "npm run --workspace=apps/api prisma generate"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nishant2253/angora.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/supertest": "^7.2.0"
+  }
+}

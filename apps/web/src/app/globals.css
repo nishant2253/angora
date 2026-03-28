@@ -1,0 +1,70 @@
+@import "tailwindcss";
+@plugin "tailwindcss-animate";
+
+:root {
+  --background: #08000F;
+  --foreground: #ffffff;
+}
+
+@theme inline {
+  /* Base colors */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  /* Angora design tokens */
+  --color-angora-bg: #08000F;
+  --color-angora-surface: #0D0020;
+  --color-angora-card: #130025;
+  --color-angora-border: #2D1B69;
+  --color-angora-primary: #836EF9;
+  --color-angora-primary-dim: #5A4AB0;
+  --color-angora-accent: #C4B5FD;
+  --color-angora-accent2: #A78BFA;
+  --color-angora-muted: #9CA3AF;
+  --color-angora-success: #34D399;
+  --color-angora-danger: #F87171;
+  --color-angora-warning: #FBBF24;
+  --color-angora-cyan: #22D3EE;
+
+  /* Gradients */
+  --background-image-gradient-primary: linear-gradient(135deg, #836EF9, #5A4AB0);
+  --background-image-gradient-hero: linear-gradient(180deg, #08000F 0%, #0D0020 100%);
+  --background-image-gradient-card: linear-gradient(135deg, #0D0020, #130025);
+  --background-image-glow-primary: radial-gradient(circle, rgba(131,110,249,0.15), transparent);
+
+  /* Shadows */
+  --shadow-glow-primary: 0 0 30px rgba(131,110,249,0.25);
+  --shadow-glow-success: 0 0 20px rgba(52,211,153,0.2);
+  --shadow-card: 0 4px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);
+
+  /* shadcn/ui CSS variable tokens */
+  --color-border: #2D1B69;
+  --color-input: #0D0020;
+  --color-ring: #836EF9;
+  --color-card: #0D0020;
+  --color-card-foreground: #ffffff;
+  --color-popover: #0D0020;
+  --color-popover-foreground: #ffffff;
+  --color-primary: #836EF9;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #130025;
+  --color-secondary-foreground: #C4B5FD;
+  --color-muted: #130025;
+  --color-muted-foreground: #9CA3AF;
+  --color-accent: #130025;
+  --color-accent-foreground: #C4B5FD;
+  --color-destructive: #F87171;
+  --radius: 0.5rem;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+* {
+  border-color: var(--color-angora-border);
+}

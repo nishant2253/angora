@@ -1,0 +1,39 @@
+// Angora — Prisma Schema
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Agent {
+  id           String      @id @default(uuid())
+  ownerAddress String
+  config       Json
+  configHash   String
+  strategyType String
+  txHash       String?
+  active       Boolean     @default(true)
+  cronInterval String      @default("1h")
+  nextRunAt    DateTime?
+  lastRunAt    DateTime?
+  createdAt    DateTime    @default(now())
+  executions   Execution[]
+}
+
+model Execution {
+  id         String   @id @default(uuid())
+  agentId    String
+  signal     String   // BUY | SELL | HOLD
+  price      Float
+  confidence Int
+  reasoning  String
+  txHash     String?
+  pnlPct     Float?
+  createdAt  DateTime @default(now())
+  agent      Agent    @relation(fields: [agentId], references: [id])
+}

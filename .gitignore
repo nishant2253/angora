@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+out/
+.next/
+build/
+artifacts/
+cache/
+typechain-types/
+
+# Environment secrets — NEVER commit these
+apps/api/.env
+apps/web/.env.local
+.env
+.env.local
+.env*.local
+
+# Foundry
+packages/contracts/out/
+packages/contracts/cache/
+
+# Prisma generated
+apps/api/generated/
+
+# Redis
+dump.rdb
+
+# Cursor / agent internals
+.agents/
+skills-lock.json
+
+# Misc
+.DS_Store
+*.log
+npm-debug.log*
